@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Candle } from "../services/api";
+import { type Candle } from "../services/api";
 
 
 export interface CandleStreamMessage {

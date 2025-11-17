@@ -11,7 +11,7 @@ from app.services import finnhub_client
 from app.services.candle_stream import stream_candles_to_websocket
 
 app = FastAPI(title="TradeMind API", version="0.1.0")
-app.include_router(candlesRoute.router)
+app.include_router(candlesRoute)
 
 
 app.add_middleware(

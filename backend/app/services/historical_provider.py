@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from app.models.candles import Candle
 from typing import List, Literal, Dict
 import yfinance as yf
 import asyncio
@@ -24,22 +24,17 @@ async def _fetch_finnhub_candles(
     Wraps the existing Finnhub REST call and normalizes to a list of
     {t, o, h, l, c, v} dicts.
     """
-    raw = await finnhub_get_stock_candles(symbol, resolution, from_ts, to_ts)
-    if raw.s != "ok":
-        return []
-    
+    candles_list: List[Candle] = await finnhub_get_stock_candles(symbol, resolution, from_ts, to_ts)    
     candles: List[Dict] = []
-    for i in range(len(raw.t)):
-        candles.append(
-            {
-                "t": int(raw.t[i])
-                "o": float(raw.o[i]),
-                "h": float(raw.h[i]),
-                "l": float(raw.l[i]),
-                "c": float(raw.c[i]),
-                "v": int(raw.v[i]),
-            }
-        )
+    for c in candles_list:
+        candles.append({
+            "t": c.t,
+            "o": c.o,
+            "h": c.h,
+            "l": c.l,
+            "c": c.c,
+            "v": c.v,
+            })
         return candles
 
 def _fetch_yahoo_candles_sync(

@@ -15,7 +15,7 @@ from app.services.historical_provider import (
 
 router = APIRouter(prefix="/candles", tags=["candles"])
 
-@router.get("/hisotry", response_model=List[Candle])
+@router.get("/history", response_model=List[Candle])
 async def candles_history(
     symbol: str = Query(..., description="Symbol name"),
     resolution: Resolution = Query(
@@ -23,7 +23,7 @@ async def candles_history(
         description="Intraday resolution (1, 5, 15, 30, 60, D)",
 
     ),
-    minutes: {int} = Query(
+    minutes: Optional[int] = Query(
         None,
         ge=1,
         le = 60 *24*365,

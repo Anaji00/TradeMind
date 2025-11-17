@@ -56,16 +56,19 @@ def classify_candle(latest: Candle, previous: Optional[Candle] = None)-> List[st
                 c > prev_o
             ):
                 patterns.append("bullish_engulfing")
+            if c < o and prev_c > prev_o and o > prev_c and c < prev_o:
+                patterns.append("bearish_engulfing")
+
 
             # Bearish engulfing: previous green, current red, and current body fully
             # covers previous body.
-            if not patterns:
-                if c>o:
-                    patterns.append("bullish")
-                elif c < o:
-                    patterns.append("bearish")
-                else:
-                    patterns.append("neutral")
+    if not patterns:
+        if c>o:
+            patterns.append("bullish")
+        elif c < o:
+            patterns.append("bearish")
+        else:
+            patterns.append("neutral")
 
     return patterns
 

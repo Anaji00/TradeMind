@@ -22,7 +22,7 @@ async def stream_candles_to_websocket(
     This is per-WebSocket connection: simple and easy to reason about.
     Later you can centralize polling if you have many clients.
     """
-    last_ts = Optional[int] = None
+    last_ts: Optional[int] = None
     while True:
         candles = await get_recent_candles(
             symbol=symbol,
