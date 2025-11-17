@@ -1,0 +1,10 @@
+*.env
+# Visual Studio junk
+.vs/
+*.user
+*.suo
+
+# Build output
+bin/
+obj/
+*__pycache__

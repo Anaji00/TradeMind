@@ -1,0 +1,6 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+httpx==0.27.0          # async HTTP client for Finnhub REST
+python-dotenv==1.0.1   # load FINNHUB_API_KEY from .env
+pydantic==2.9.0
+websockets==13.0       # connect to Finnhub WS for real-time trades
