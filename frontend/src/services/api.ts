@@ -16,7 +16,7 @@ export async function fetchHistoricalCandles(
     minutes = 120,
     resolution = "1"
 ): Promise<Candle[]> {
-    const res = await axios.get<Candle[]>(`{API_BASE_URL}/candles/history`, {
+    const res = await axios.get<Candle[]>(`${API_BASE_URL}/candles/history`, {
         params: {symbol, minutes, resolution},
     });
     return res.data;

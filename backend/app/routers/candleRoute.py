@@ -5,9 +5,8 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, HTTPException
-
 from app.models.candles import Candle
-
+from httpx import HTTPStatusError
 from app.services.historical_provider import (
     Resolution,
     get_historical_candles,
@@ -81,9 +80,15 @@ async def candles_history(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPStatusError as e:
+        status = e.response.status_code
+        detail = e.response.text or "Upstream data provider error"
+        raise HTTPException(status_code=status, detail=detail)
+
 
     if not candles:
-        raise HTTPException(status_code=404, detail="No candles found")
+        raise HTTPException(f"No candles found for {symbol} in range {from_ts_eff}–{to_ts_eff} with provider={provider}")
+
 
     return candles
         

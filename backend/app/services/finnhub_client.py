@@ -18,7 +18,7 @@ async def init_client() -> None:
     """
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(base_url=BASE_URL)
+        _client = httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
 
 async def close_client() -> None:
     """
