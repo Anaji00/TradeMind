@@ -87,7 +87,7 @@ async def candles_history(
 
 
     if not candles:
-        raise HTTPException(f"No candles found for {symbol} in range {from_ts_eff}–{to_ts_eff} with provider={provider}")
+        raise HTTPException(status_code=404, detail=f"No candles found for {symbol} in range {from_ts_eff}–{to_ts_eff} with provider={provider}")
 
 
     return candles
