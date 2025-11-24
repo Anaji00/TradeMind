@@ -11,6 +11,12 @@ from .finnhub_client import get_stock_candles as finnhub_get_stock_candles
 
 Resolution = Literal["1", "5", "15", "30", "60", "D", "W", "M"]
 
+INTRADAY_RESOLUTION = ("1", "5", "15", "30", "60")
+ONE_DAY_SECONDS = 60 * 60 * 24
+THIRTY_DAYS_SECONDS = ONE_DAY_SECONDS * 30
+ONE_YEAR_SECONDS = ONE_DAY_SECONDS * 365
+
+
 
 def _unix_to_datetime(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz = timezone.utc)
@@ -45,8 +51,8 @@ def _fetch_yahoo_candles_sync(
     """
     start_dt_utc = _unix_to_datetime(from_ts)
     end_dt_utc = _unix_to_datetime(to_ts)
-    start = start_dt_utc.replace(tzinfo=None)
-    end = end_dt_utc.replace(tzinfo=None)
+    start = start_dt_utc
+    end = end_dt_utc
 
     # Map our resolution to yfinance interval strings
     interval_map = {
@@ -167,13 +173,15 @@ async def get_historical_candles(
     - provider="auto": choose Finnhub for near-term intraday, Yahoo for
       long-range or higher timeframe.
     - provider="finnhub" or "yahoo": force a specific provider.
+
+    Also enforces guardrails for very fine resolutions (e.g., 1-minute)
+    so we don't ask providers for impossible / overly heavy ranges.
     """
     provider_norm = (provider or "auto").lower()
+    range_seconds = max(to_ts - from_ts, 0)
     if provider_norm == "auto":
-        range_seconds = max(to_ts - from_ts, 0)
-        one_year_seconds = 365 * 24 * 60 * 60
-        
-        if resolution in ("1", "5", "15", "30", "60") and range_seconds <= one_year_seconds:
+    
+        if resolution in INTRADAY_RESOLUTION and range_seconds <= ONE_YEAR_SECONDS:
             provider_to_use = "finnhub"
         else:
             provider_to_use = "yahoo"
@@ -181,15 +189,42 @@ async def get_historical_candles(
         provider_to_use = provider_norm
     else:
         raise ValueError(f"Invalid provider: {provider_norm}")
-    
+
+    # ---------- Provider-specific guardrails ----------
+    # Note: we use provider_norm here so that 'auto' still respects
+    # Yahoo's 1m limitation (since auto may fall back to Yahoo).
+
+    if resolution == "1":
+        if provider_norm in ("auto", "yahoo") and range_seconds > THIRTY_DAYS_SECONDS:
+            raise ValueError(
+                "1-minute candles are only supported within the last 30 days "
+                "due to Yahoo Finance limitations. Please request a shorter "
+                "range or use a higher timeframe (5, 15, 60, or D)."
+            )
+        if provider_norm == "finnhub" and range_seconds > ONE_YEAR_SECONDS:
+            raise ValueError(
+                "Finnhub does not support longer ranges than 1 year. "
+                "Please request a shorter range."
+            )
+
     if provider_to_use == "finnhub":
         try:
             return await _fetch_finnhub_candles(symbol, resolution, from_ts, to_ts)
         except HTTPStatusError as e:
             # If auto-selected Finnhub and it fails (403/401/429/etc)
             if provider_norm == "auto":
-                print(f"[FINNHUB] HTTP error {e.response.status_code}, falling back to Yahoo")
+                print(
+                    f"[FINNHUB] HTTP error {e.response.status_code} for {symbol}, "
+                    f"resolution={resolution}, range={range_seconds}s; "
+                    "falling back to Yahoo."
+                )
                 return await(_fetch_yahoo_candles(symbol, resolution, from_ts, to_ts))
             raise
     elif provider_to_use == "yahoo":
+        # Extra sanity guard if someone bypasses provider_norm logic:
+        if resolution == "1" and range_seconds > THIRTY_DAYS_SECONDS:
+            raise ValueError(
+                "1-minute candles via Yahoo are only available for the last 30 days. "
+                "Use a shorter range or higher timeframe (5, 15, 60, D, etc.)."
+            )    
         return await _fetch_yahoo_candles(symbol, resolution, from_ts, to_ts)

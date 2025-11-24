@@ -1,7 +1,8 @@
 # app/routers/candles.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, HTTPException
@@ -11,6 +12,55 @@ from app.services.historical_provider import (
     Resolution,
     get_historical_candles,
 )
+
+US_EASTERN = ZoneInfo("America/New_York")
+US_CENTRAL = ZoneInfo("America/Chicago")
+US_MOUNTAINS = ZoneInfo("America/Denver")
+US_WESTERN = ZoneInfo("America/Los_Angeles")
+MARKET_OPEN = time(9, 30, tzinfo=US_EASTERN)
+MARKET_CLOSE = time(16, 0, tzinfo=US_EASTERN)
+
+def _intraday_anchor(now_ts: int, resolution: Resolution, minutes: Optional[int]) -> int:
+    """
+    Returns a 'to_ts' anchor in UTC seconds for intraday ranges.
+    - If we are inside a weekday session (9:30–16:00 ET), return now_ts unchanged.
+    - If we are before 9:30 ET, after 16:00 ET, or on a weekend, 
+      return the last weekday’s 16:00 ET timestamp.
+    For non-intraday resolutions or when minutes is None, just return now_ts.
+    """
+    if minutes is None or resolution not in ("1", "5", "15", "30", "60"):
+        return now_ts
+    now_utc = datetime.fromtimestamp(now_ts, tz=timezone.utc)
+    now_et = now_utc.astimezone(US_EASTERN)
+    dow = now_et.weekday()
+    current_time = now_et.time()
+
+    # Helper to find the previous weekday (skip weekends)
+
+    def previous_weekday(d: datetime.date) -> datetime.date:
+        d = d - timedelta(days=1)
+        while d.weekday() > 4:
+            d = d - timedelta(days=1)
+        return d
+
+    # Case 1: within regular session on a weekday
+    if dow < 5 and MARKET_OPEN <= current_time <= MARKET_CLOSE:
+        return now_ts
+    
+    # Determine which day’s close to use
+    if dow >= 5: # weekend
+        # go to frindays data
+        last_day = now_et.date()
+        while last_day.weekday() > 4:
+            last_day = previous_weekday(last_day)
+    elif current_time < MARKET_OPEN:
+        # go to previous weekday’s close
+        last_day = previous_weekday(now_et.date())
+    else: # after today’s close
+        last_day = now_et.date()
+
+    anchor_et = datetime.combine(last_day, MARKET_CLOSE, tzinfo=US_EASTERN)
+    return int(anchor_et.astimezone(timezone.utc).timestamp())
 
 router = APIRouter(prefix="/candles", tags=["candles"])
 
@@ -61,7 +111,7 @@ async def candles_history(
         minutes = 60*24
 
     if from_ts is None:
-        to_ts_eff = to_ts if to_ts is not None else now
+        to_ts_eff = to_ts if to_ts is not None else _intraday_anchor(now, resolution, minutes)
         from_ts_eff = to_ts_eff - minutes * 60
     else:
         from_ts_eff = from_ts
