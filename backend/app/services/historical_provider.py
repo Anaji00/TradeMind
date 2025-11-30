@@ -1,12 +1,13 @@
 from __future__ import annotations
 from app.models.candles import Candle
-from typing import List, Literal
+from typing import List, Literal, Dict
 import yfinance as yf
 from httpx import HTTPStatusError
 import asyncio
 from datetime import datetime, timezone
 import pandas as pd
-
+import time
+from .utils import _cache_get, _cache_set, _rate_limit_check, RateLimitError
 from .finnhub_client import get_stock_candles as finnhub_get_stock_candles
 
 Resolution = Literal["1", "5", "15", "30", "60", "D", "W", "M"]
@@ -20,6 +21,8 @@ ONE_YEAR_SECONDS = ONE_DAY_SECONDS * 365
 
 def _unix_to_datetime(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz = timezone.utc)
+
+
 
 
 async def _fetch_finnhub_candles(
@@ -68,18 +71,27 @@ def _fetch_yahoo_candles_sync(
     interval = interval_map.get(resolution, "1d")
 
     print (f"[YAHOO] symbol={symbol}, start={start}, end={end}, interval={interval}")
-
-    df = yf.download(
-        symbol, 
-        start=start,
-        end=end,
-        interval=interval,
-        progress=False,
-        auto_adjust=False,
-    )
+    try:
+        df = yf.download(
+            symbol, 
+            start=start,
+            end=end,
+            interval=interval,
+            progress=False,
+            auto_adjust=False,
+        )
+    except Exception as e:
+        print(
+            f"[YAHOO] Exception while downloading data for {symbol}: {e!r} "
+            f"(interval={interval}, start={start}, end={end})"
+        )
+        return []
 
     if df is None or df.empty:
-        print(f"[YAHOO] Empty DataFrame fpr {symbol}, interval: {interval}, start: {start}, end: {end}")
+        print(
+            f"[YAHOO] Empty DataFrame for {symbol}, "
+            f"interval: {interval}, start: {start}, end: {end}"
+        )        
         return []
     
     # normalize columns 
@@ -110,6 +122,7 @@ def _fetch_yahoo_candles_sync(
         print(f"[YAHOO] Missing required columns for {symbol}, got {df.columns}")
         return []
     
+    # Sample logs with human-readable times
     try:
         print(f"[YAHOO] Printing sample OHLC rows with times:")
         for ts, row in df[required_columns].head(5).iterrows():
@@ -179,6 +192,29 @@ async def get_historical_candles(
     """
     provider_norm = (provider or "auto").lower()
     range_seconds = max(to_ts - from_ts, 0)
+
+    # -- Provider guardrails --
+    if resolution == "1":
+        if provider_norm in ("auto", "yahoo"):
+            if range_seconds > THIRTY_DAYS_SECONDS:
+                raise ValueError(
+                    "1-minute candles are only supported within the last 30 days "
+                    "due to Yahoo Finance limitations. Please request a shorter "
+                    "range or use a higher timeframe (5, 15, 60, or D)."
+                )
+        elif provider_norm == "finnhub":
+            if range_seconds > ONE_YEAR_SECONDS:
+                raise ValueError(
+                    "Finnhub does not support longer ranges than 1 year. "
+                    "Please request a shorter range."
+                )
+
+
+
+
+
+
+    # ---------- Provider selection ----------
     if provider_norm == "auto":
     
         if resolution in INTRADAY_RESOLUTION and range_seconds <= ONE_YEAR_SECONDS:
@@ -189,42 +225,69 @@ async def get_historical_candles(
         provider_to_use = provider_norm
     else:
         raise ValueError(f"Invalid provider: {provider_norm}")
+    
+    symbol_upper = symbol.upper()
+    cache_key = (symbol_upper, resolution, from_ts, to_ts, provider_to_use)
 
-    # ---------- Provider-specific guardrails ----------
-    # Note: we use provider_norm here so that 'auto' still respects
-    # Yahoo's 1m limitation (since auto may fall back to Yahoo).
+    # ---------- Check cache ----------
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        print(
+            f"[CACHE] Hit for {symbol_upper}, res={resolution}, "
+            f"from={from_ts}, to={to_ts}, provider={provider_to_use}"
+        )
+        return cached
+    
+    #--------- Rate limit check ----------
+    try:
+        _rate_limit_check(provider_to_use)
+    except RateLimitError as e:
+        raise ValueError(str(e)) from e
+    
 
-    if resolution == "1":
-        if provider_norm in ("auto", "yahoo") and range_seconds > THIRTY_DAYS_SECONDS:
+    if provider_to_use == "finnhub":
+        try:
+            candles = await _fetch_finnhub_candles(symbol_upper, resolution, from_ts, to_ts)
+            _cache_set(cache_key, candles)
+            return candles
+
+        except HTTPStatusError as e:
+            status = e.response.status_code
+            text = e.response.text
+            # If auto-selected Finnhub and it fails (403/401/429/etc)
+            if provider_norm == "auto":
+                print(
+                    f"[FINNHUB] HTTP error {status} for {symbol_upper}, "
+                    f"resolution={resolution}, range={range_seconds}s; "
+                    "falling back to Yahoo."
+                )
+                _rate_limit_check("yahoo")
+                candles = await(_fetch_yahoo_candles(symbol, resolution, from_ts, to_ts))
+                try:
+                    candles = await _fetch_yahoo_candles(symbol, resolution, from_ts, to_ts)
+                    fallback_key = (symbol_upper, resolution, from_ts, to_ts, "yahoo")
+                    _cache_set(fallback_key, candles)
+                    return candles
+                except Exception as e2:
+                    raise ValueError(
+                        f"Finnhub HTTP error {status}: {text}; "
+                        f"Yahoo fallback also failed: {e2}"
+                    ) from e2
+                
+            # User explicitly asked for Finnhub, so bubble as 400
+            raise ValueError(
+                f"Finnhub HTTP {status} for {symbol_upper}: {text}"
+            ) from e
+    elif provider_to_use == "yahoo":
+        if resolution == "1" and range_seconds > THIRTY_DAYS_SECONDS:
             raise ValueError(
                 "1-minute candles are only supported within the last 30 days "
                 "due to Yahoo Finance limitations. Please request a shorter "
                 "range or use a higher timeframe (5, 15, 60, or D)."
             )
-        if provider_norm == "finnhub" and range_seconds > ONE_YEAR_SECONDS:
-            raise ValueError(
-                "Finnhub does not support longer ranges than 1 year. "
-                "Please request a shorter range."
-            )
-
-    if provider_to_use == "finnhub":
         try:
-            return await _fetch_finnhub_candles(symbol, resolution, from_ts, to_ts)
-        except HTTPStatusError as e:
-            # If auto-selected Finnhub and it fails (403/401/429/etc)
-            if provider_norm == "auto":
-                print(
-                    f"[FINNHUB] HTTP error {e.response.status_code} for {symbol}, "
-                    f"resolution={resolution}, range={range_seconds}s; "
-                    "falling back to Yahoo."
-                )
-                return await(_fetch_yahoo_candles(symbol, resolution, from_ts, to_ts))
-            raise
-    elif provider_to_use == "yahoo":
-        # Extra sanity guard if someone bypasses provider_norm logic:
-        if resolution == "1" and range_seconds > THIRTY_DAYS_SECONDS:
-            raise ValueError(
-                "1-minute candles via Yahoo are only available for the last 30 days. "
-                "Use a shorter range or higher timeframe (5, 15, 60, D, etc.)."
-            )    
-        return await _fetch_yahoo_candles(symbol, resolution, from_ts, to_ts)
+            candles = await _fetch_yahoo_candles(symbol_upper, resolution, from_ts, to_ts)
+            _cache_set(cache_key, candles)
+            return candles
+        except Exception as e:
+            raise ValueError(f"Yahoo Finance error for {symbol_upper}: {e}") from e

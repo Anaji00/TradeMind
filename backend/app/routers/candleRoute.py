@@ -1,4 +1,4 @@
-# app/routers/candles.py
+# app/routers/candleRoute.py
 from __future__ import annotations
 
 from datetime import datetime, timezone, time, timedelta
@@ -7,16 +7,14 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query, HTTPException
 from app.models.candles import Candle
-from httpx import HTTPStatusError
 from app.services.historical_provider import (
     Resolution,
     get_historical_candles,
 )
+from app.services.utils import RateLimitError
+
 
 US_EASTERN = ZoneInfo("America/New_York")
-US_CENTRAL = ZoneInfo("America/Chicago")
-US_MOUNTAINS = ZoneInfo("America/Denver")
-US_WESTERN = ZoneInfo("America/Los_Angeles")
 MARKET_OPEN = time(9, 30, tzinfo=US_EASTERN)
 MARKET_CLOSE = time(16, 0, tzinfo=US_EASTERN)
 
@@ -128,16 +126,20 @@ async def candles_history(
             to_ts=to_ts_eff,
             provider=provider,
         )
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPStatusError as e:
+    except Exception as e:
         status = e.response.status_code
         detail = e.response.text or "Upstream data provider error"
         raise HTTPException(status_code=status, detail=detail)
 
 
     if not candles:
-        raise HTTPException(status_code=404, detail=f"No candles found for {symbol} in range {from_ts_eff}–{to_ts_eff} with provider={provider}")
+        raise HTTPException(
+            status_code=404, detail=f"No candles found for {symbol} in range {from_ts_eff}–{to_ts_eff} with provider={provider}"
+            )
 
 
     return candles

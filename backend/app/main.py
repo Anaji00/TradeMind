@@ -52,4 +52,4 @@ async def candles_ws(
         print (f"Websocket disconnected for {symbol}")
     except Exception as e:
         print (f"Websocket error for {symbol}: {e}")
-        await websocket.close(code=1011)
+        await websocket.close(code=1011)  # 1011: Internal Error
