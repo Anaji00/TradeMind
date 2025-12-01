@@ -1,8 +1,8 @@
-import React, {useEffect, useState} from "react";
+import {useEffect, useState} from "react";
 import { type Candle, fetchHistoricalCandles } from "./services/api";
 import ChartPanel from "./components/ChartPanel";
 
-const DEFAULT_SYMBOL = "AAPL";
+const DEFAULT_SYMBOL = "NVDA";
 
 
 function App() {

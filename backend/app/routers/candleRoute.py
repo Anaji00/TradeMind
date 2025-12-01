@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, time, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from fastapi import APIRouter, Query, HTTPException
 from app.models.candles import Candle
@@ -61,6 +61,8 @@ def _intraday_anchor(now_ts: int, resolution: Resolution, minutes: Optional[int]
     return int(anchor_et.astimezone(timezone.utc).timestamp())
 
 router = APIRouter(prefix="/candles", tags=["candles"])
+
+Preset = Literal["1D", "5D", "1M", "3M", "6M", "1Y", "5Y"]
 
 @router.get("/history", response_model=List[Candle])
 async def candles_history(
