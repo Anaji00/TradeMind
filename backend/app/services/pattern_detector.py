@@ -46,7 +46,7 @@ def classify_candle(latest: Candle, previous: Optional[Candle] = None)-> List[st
         prev_body = abs(prev_c - prev_o)
 
 
-        if prev_body > 0 and body > prev_body * 1.1:
+        if prev_body > 0 and body > prev_body * 0.7:
             # Bullish engulfing: previous red, current green, and current body fully
             # covers previous body.
             if (

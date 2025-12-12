@@ -1,75 +1,67 @@
-import {useEffect, useState} from "react";
-import { type Candle, fetchHistoricalCandles } from "./services/api";
-import ChartPanel from "./components/ChartPanel";
-
+import SymbolChart from "./components/SymbolChart";
+import ExplorePage from "./components/ExplorePage";
+import { 
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  NavLink,
+  Link 
+} from "react-router-dom";
 const DEFAULT_SYMBOL = "NVDA";
 
 
 function App() {
-  const [symbol] = useState<string>(DEFAULT_SYMBOL);
-  const [candles, setCandles] = useState<Candle[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await fetchHistoricalCandles(symbol, 120, "1");
-        setCandles(data);
-      } catch (err) {
-      console.log(err);
-      setError("Failed to load candles from backend");
-
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [symbol]);
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#020617",
-        color: "#e5e7eb",
-        padding: "1rem",
-      }}
-    >
-      <header
-        style={{
-          maxWidth: "960px",
-          margin: "0 auto 1rem",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ fontSize: "1.25rem", fontWeight: 600}}>TradeMind</h1>
-        <div style={{ fontSize:"0.9rem", color: "#9ca3af"}}>
-          Real-Time Candles & Pattern Loading
-        </div>
-      </header>
-
-      <main style={{ maxWidth: "960 px", margin: "0 auto"}}>
-        {error && (
-          <div style={{ marginBottom: "0.75rem", color: "#f87171"}}>
-            {error}
-          </div>
-        )}
-
-        {loading ? (
-          <div>Loading Candles....</div>
-        ): candles.length === 0 ? (
-          <div>No candles available for {symbol}</div>
-        ) : (
-          <ChartPanel symbol={symbol} initialCandles={candles} />
-        )}
-      </main>
+    <BrowserRouter>
+      <div className="min-h-screen bg-slate-950">
+        <header className="border-b border-slate-800 bg-slate-950/80 px-4 py-3 shadow-sm">
+          <Link to="/chart" className = "flex items-baseline gap-2">
+            <h1 className="text-lg font-semibold tracking-light">
+              TradeMind
+            </h1>
+            <span className="text-xs text-slate-400">
+              Charts &amp; social, WIP
+            </span>
+          </Link>
+          <nav className="flex gap-4 text-sm">
+            <NavLink
+              to="/chart"
+              className={({ isActive }: { isActive: boolean }) =>
+                isActive
+                  ? "text-emerald-400 font-medium"
+                  : "text-slate-300 hover:text-emerald-300"
+              }
+            >
+              Chart
+            </NavLink>
+            <NavLink
+              to="/explore"
+              className={({ isActive }: { isActive: boolean }) =>
+                isActive
+                  ? "text-emerald-400 font-medium"
+                  : "text-slate-300 hover:text-emerald-300"
+              }
+            >
+              Explore
+            </NavLink>
+          </nav>
+        </header>
       </div>
+
+      <main className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-4">
+        <Routes>
+          <Route
+            path="/" element={<Navigate to="/chart" replace />} />
+          <Route
+            path="/chart" element={<SymbolChart defaultSymbol={DEFAULT_SYMBOL} />} />
+          <Route
+            path="/explore" element={<ExplorePage />} />
+          <Route
+            path="*" element={<Navigate to="/chart" replace />} />
+        </Routes>
+      </main>
+    </BrowserRouter>
   );
 }
 

@@ -1,51 +1,62 @@
 from __future__ import annotations
 
-from typing import Optional
+import json
 import asyncio
 
 from fastapi import WebSocket
-from app.models.candles import Candle
-from app.services.finnhub_client import get_recent_candles
-from app.services.pattern_detector import classify_candle
+from app.services.redis_client import redis_client
+from app.services.candle_poller import CandlePoller
+
 
 async def stream_candles_to_websocket(
-    websocket: WebSocket,
-    symbol: str,
-    resolution: str = "1",
-    lookback_minutes: int = 120,
-    poll_interval_seconds: int = 5,
-) -> None:
+        websocket: WebSocket,
+        symbol: str,
+        resolution: str = "1",
+    ) -> None:
     """
-    Continuously poll Finnhub for recent candles and push new ones
-    to the client as JSON.
-
-    This is per-WebSocket connection: simple and easy to reason about.
-    Later you can centralize polling if you have many clients.
+    Connects the client WebSocket to the Redis Pub/Sub channel
+    for live candle updates for the given symbol and resolution.
     """
-    last_ts: Optional[int] = None
-    while True:
-        candles = await get_recent_candles(
-            symbol=symbol,
-            resolution=resolution,
-            lookback_minutes=lookback_minutes,
-        )
-        if candles:
-            latest: Candle = candles[-1]
-            previous: Optional[Candle] = candles[-2] if len(candles) >= 2 else None
+    symbol = symbol.upper()
 
-            if last_ts is None or latest.t != last_ts:
-                patterns = classify_candle(latest, previous)
+    # Register symbol for polling
+    CandlePoller.subscribe(symbol)
 
-                await websocket.send_json(
-                    {
-                        "type": "candle",
-                        "symbol": symbol,
-                        "resolution": resolution,
-                        "candle": latest.model_dump(),
-                        "patterns": patterns,
-                    }
-                )
+    if redis_client is None:
+        await websocket.send_json({"error": "Data Stream Unavailable, check Redis config."})
+        await websocket.close(code=1011)
+        return
+    
+    pubsub = None
+    try:
+        # 2. Open a dedicated PubSub connection and subscribe to the channel
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(CandlePoller.REDIS_CHANNEL)
 
-                last_ts = latest.t
+        # 3. Listen for messages and forward relevant ones to the WebSocket
+        while websocket.client_state.name == "CONNECTED":
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1)
 
-        await asyncio.sleep(poll_interval_seconds)
+            if message and message.get('data'):
+                try:
+                    data = json.loads(message['data'].decode('utf-8'))
+
+                    if data.get("symbol") == symbol:
+                        await websocket.send_json(data)
+                except Exception as e:
+                    print(f"Error processing PubSub message for {symbol}: {e}")
+
+    except asyncio.CancelledError:
+        pass  # Normal on disconnect
+    except Exception as e:
+        print(f"Error in stream_candles_to_websocket for {symbol}: {e}")
+        await websocket.close(code=1011)
+    finally:
+        # Cleanup
+        if pubsub:
+            await pubsub.unsubscribe(CandlePoller.REDIS_CHANNEL)
+            await pubsub.close()
+
+        CandlePoller.unsubscribe(symbol)
+
+        
